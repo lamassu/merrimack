@@ -1,0 +1,29 @@
+{
+  "name": "merrimack",
+  "version": "0.0.0",
+  "description": "A unified log implementation layer on top of FoundationDB",
+  "main": "index.js",
+  "dependencies": {
+    "fdb": "~3.0.3",
+    "bytebuffer": "~3.5.4",
+    "bluebird": "~2.3.11"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/joshmh/merrimack.git"
+  },
+  "keywords": [
+    "unified log",
+    "event stream",
+    "foundationdb"
+  ],
+  "author": "Josh Harvey <josh@lamassu.is> (https://lamassu.is/)",
+  "license": "UNLICENSE",
+  "bugs": {
+    "url": "https://github.com/joshmh/merrimack/issues"
+  }
+}
