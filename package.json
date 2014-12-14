@@ -6,7 +6,9 @@
   "dependencies": {
     "fdb": "~3.0.3",
     "bytebuffer": "~3.5.4",
-    "bluebird": "~2.3.11"
+    "bluebird": "~2.3.11",
+    "fasterror": "0.0.0",
+    "lodash": "~2.4.1"
   },
   "devDependencies": {},
   "scripts": {

@@ -1,14 +1,18 @@
 'use strict';
 
+var fasterror = require('fasterror');
 var Bluebird = require('bluebird');
-var join = Bluebird.join;
 var ByteBuffer = require('bytebuffer');
 var fdb = require('fdb').apiVersion(300);
 var db = fdb.open();
+var _ = require('lodash');
 
 var RANDOM_BITS = 20;
 var RANDOM_FACTOR = 0x1 << RANDOM_BITS;
-var ZERO_64 = new ByteBuffer(8, ByteBuffer.LITTLE_ENDIAN).writeUint64(0).buffer;
+var ZERO_64 = packNum(0);
+var SECONDARY_COUNTER_BASE = 2;
+
+var AppConflictError = fasterror('AppConflictError');
 
 var lcounter = 0;
 var dirs;
@@ -21,7 +25,8 @@ exports.init = function init() {
       records: merrimack.createOrOpen(db, 'records'),
       topics: merrimack.createOrOpen(db, 'topics'),
       timestamps: merrimack.createOrOpen(db, 'timestamps'),
-      gcounter: merrimack.createOrOpen(db, 'gcounter')
+      gcounter: merrimack.createOrOpen(db, 'gcounter'),
+      scounters: merrimack.createOrOpen(db, 'scounters')
     })
     .then(function(result) {
       dirs = result;
@@ -31,14 +36,46 @@ exports.init = function init() {
   });
 };
 
+function backoff() {
+}
+
+function shallIncrement() {
+  // whether to increment or not based on backoff percentage
+  return true;
+}
+
+exports.nuke = function nuke() {
+  var clears = _.map(dirs, function(dir) {
+    var r = dir.range();
+    return db.clearRange(r.begin, r.end);
+  });
+  clears.concat(db.clear(dirs.gcounter));
+  return Bluebird.all(clears);
+};
+
+// TODO check everything for idempotence
 exports.insertRec = function insertRec(topic, message) {
   var messageStr = JSON.stringify(message);
   var now = Date.now();
 
   function fdbInsertRec(tr, cb) {
-    tr.get(dirs.gcounter)
+    var gcounter;
+    tr.snapshot.get(dirs.gcounter)
     .then(function(gcounterBuf) {
-      var gcounter = unpackNum(gcounterBuf);
+      gcounter = unpackNum(gcounterBuf);
+      var sIndex = gcounter % SECONDARY_COUNTER_BASE;
+      var scounterKey = dirs.scounters.pack([sIndex]);
+      return tr.get(scounterKey);
+    })
+    .then(function(scounterBuf) {
+      var scounter = unpackNum(scounterBuf);
+      if (scounter !== gcounter) {
+        backoff();
+        return cb(new AppConflictError('scounter and gcounter don\'t match'));
+        // adjust backoff
+        // Error out, would be nice to treat this as a conflict to get free retries
+        // Otherwise, error out and retry entire tx after timeout
+      }
       var rand = Math.floor(Math.random() * RANDOM_FACTOR);
       var key = dirs.records.pack([gcounter, lcounter, rand]);
       var topicKey = dirs.topics.pack([topic, gcounter, lcounter, rand]);
@@ -47,9 +84,18 @@ exports.insertRec = function insertRec(topic, message) {
       tr.set(key, messageStr);
       tr.set(topicKey, messageStr);
       tr.set(timeKey, key);
+
+      if (shallIncrement()) {
+        var newGcounter = gcounter + 1;
+        var newScounterIndex = newGcounter % SECONDARY_COUNTER_BASE;
+        var newScounterKey = dirs.scounters.pack([newScounterIndex]);
+        tr.max(dirs.gcounter, packNum(newGcounter));
+        tr.set(newScounterKey, packNum(newGcounter));
+      }
       return cb();
     })
     .catch(function(err) {
+      //adjust backoff
       return cb(err);
     });
   }
@@ -57,25 +103,12 @@ exports.insertRec = function insertRec(topic, message) {
   return db.doTransaction(fdbInsertRec);
 };
 
-exports.incrementGlobalCounter = function incrementGlobalCounter() {
-  function fdbIncrement(tr, cb) {
-    var r = dirs.records.range();
-    tr.snapshot.getKey(fdb.KeySelector.lastLessThan(r.end))
-    .then(function(key) {
-      var gcounter = dirs.records.unpack(key)[0] + 1;
-      var gcounterBuf = new ByteBuffer(8, ByteBuffer.LITTLE_ENDIAN).
-        writeUint64(gcounter).buffer;
-      tr.max(dirs.gcounter, gcounterBuf);
-      cb();
-    })
-    .catch(function(err) {
-      cb(err);
-    });
-  }
-  return db.doTransaction(fdbIncrement);
-};
-
 function unpackNum(buf) {
+  if (!buf) return 0;
   var bb = new ByteBuffer.wrap(buf, 'binary', ByteBuffer.LITTLE_ENDIAN);
   return bb.readLong(0).toNumber();
+}
+
+function packNum(num) {
+  return new ByteBuffer(8, ByteBuffer.LITTLE_ENDIAN).writeUint64(num).buffer;
 }
