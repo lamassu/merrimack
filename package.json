@@ -1,7 +1,7 @@
 {
   "name": "merrimack",
   "version": "0.0.0",
-  "description": "A unified log implementation layer on top of FoundationDB",
+  "description": "A unified log layer on top of FoundationDB",
   "main": "index.js",
   "dependencies": {
     "fdb": "~3.0.3",
