@@ -24,6 +24,7 @@ exports.init = function init() {
       merrimack: merrimack,
       records: merrimack.createOrOpen(db, 'records'),
       topics: merrimack.createOrOpen(db, 'topics'),
+      groups: merrimack.createOrOpen(db, 'groups'),
       timestamps: merrimack.createOrOpen(db, 'timestamps'),
       gcounter: merrimack.createOrOpen(db, 'gcounter'),
       scounters: merrimack.createOrOpen(db, 'scounters')
@@ -101,6 +102,48 @@ exports.insertRec = function insertRec(topic, message) {
   }
 
   return db.doTransaction(fdbInsertRec);
+};
+
+exports.consume = function consume(topic, group) {
+  function fdbConsume(tr, cb) {
+    var scountersRange = dirs.scounters.range();
+    var scounterMin;
+    var iter = tr.snapshot.getRange(scountersRange.begin, scountersRange.end);
+    iter.toArray()
+    .then(function(arr) {
+      scounterMin = _.min(arr, function(keyPair) {
+        return unpackNum(keyPair.value);
+      });
+      return tr.get(dirs.groups.pack([group]));
+    })
+    .then(function(offsetKey) {
+      if (!offsetKey) {
+        var topicKey= dirs.topics.pack([topic]);
+        var topicKeySelector = fdb.KeySelector.firstGreaterOrEqual(topicKey);
+        return tr.snapshot.getKey(topicKeySelector);
+      }
+      var offsetKeySelector = fdb.KeySelector.firstGreaterThan(offsetKey);
+      return tr.snapshot.getKey(offsetKeySelector);
+    })
+    .then(function(key) {
+      // No records left to process
+      if (!dirs.topics.contains(key)) return null;
+
+      var counter = dirs.topics.unpack(key)[1];
+      if (counter >= scounterMin) return null;
+      tr.set(dirs.groups.pack([group]), key);
+      return tr.snapshot.get(key);
+    })
+    .then(function(recBuf) {
+      if (!recBuf) return cb(null, null);
+      return cb(null, JSON.parse(recBuf));
+    })
+    .catch(function(err) {
+      return cb(err);
+    });
+  }
+
+  return db.doTransaction(fdbConsume);
 };
 
 function unpackNum(buf) {
