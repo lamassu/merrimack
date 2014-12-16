@@ -2,6 +2,5 @@
   "trailing": false,
   "node": true,
   "unused": "last-param",
-  "globalstrict": true,
-  "globals": {"os": true}
+  "globalstrict": true
 }
