@@ -1,6 +1,7 @@
 'use strict';
 
-//var P = require('bluebird');
+var _ = require('lodash');
+var P = require('bluebird');
 var chai = require('chai');
 var chaiAsPromised = require("chai-as-promised");
 
@@ -83,6 +84,19 @@ describe('fdb', function() {
     .then(function(msg) {
       msg.should.eql(msg2);
       return fdb.consume('something', 'groupA').should.eventually.be.null;
+    });
+  });
+
+  it('should produce and consume a lot', function() {
+    var msg1 = new Buffer('a message');
+    return P.all(_.times(10, function() {
+      return fdb.produce('something', msg1);
+    })).then(function() {
+      return P.all(_.times(12, function() {
+        return fdb.consume('something', 'groupA');
+      }));
+    }).then(function(res) {
+      _.compact(res).length.should.eql(10);
     });
   });
 });
