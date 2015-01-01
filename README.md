@@ -1,4 +1,4 @@
 merrimack
 =========
 
-A unified log implementation layer on top of FoundationDB
+An event store with a REST API for FoundationDB.
